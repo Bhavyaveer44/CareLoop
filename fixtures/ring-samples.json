@@ -1,0 +1,55 @@
+{
+  "doc_shaped": true,
+  "devices": {
+    "data": [{
+      "id": "fixture-doorbell",
+      "type": "devices",
+      "attributes": {"name": "Front door"},
+      "relationships": {
+        "status": {"data": {"id": "status-1"}},
+        "configurations": {"data": {"id": "config-1"}},
+        "location": {"data": {"id": "location-1"}}
+      }
+    }],
+    "included": [
+      {"id":"status-1","type":"device-status","attributes":{"online":true}},
+      {"id":"config-1","type":"device-configurations","attributes":{"motion_detection":{"enabled":"on"}}},
+      {"id":"location-1","type":"locations","attributes":{"country":"US","state":"NY"}}
+    ]
+  },
+  "history": {
+    "motion": {"data":[
+      {"id":"evt-human","attributes":{"event_type":"motion","start":1792498500000,"end":1792498510000}},
+      {"id":"evt-motion","attributes":{"event_type":"motion","start":1792498200000,"end":1792498210000}},
+      {"id":"evt-package","attributes":{"event_type":"motion","start":1792497900000,"end":1792497910000}}
+    ]},
+    "motion.human": {"data":[{"id":"evt-human","attributes":{"event_type":"motion","start":1792498500000,"end":1792498510000}}]},
+    "doorbell": {"data":[{"id":"evt-ding","attributes":{"event_type":"ding","start":1792497600000,"end":1792497610000}}]},
+    "on_demand": {"data":[{"id":"evt-live","attributes":{"event_type":"on_demand","start":1792497300000,"end":1792497310000}}]}
+  },
+  "events": [
+    {"id":"evt-human","deviceId":"fixture-doorbell","type":"motion","subType":"human","ts":"2026-10-20T12:15:00.000Z","source":"fixture"},
+    {"id":"evt-motion","deviceId":"fixture-doorbell","type":"motion","subType":"motion","ts":"2026-10-20T12:10:00.000Z","source":"fixture"},
+    {"id":"evt-ding","deviceId":"fixture-doorbell","type":"doorbell_press","subType":null,"ts":"2026-10-20T12:05:00.000Z","source":"fixture"},
+    {"id":"evt-live","deviceId":"fixture-doorbell","type":"live_view","subType":null,"ts":"2026-10-20T12:00:00.000Z","source":"fixture"},
+    {"id":"evt-package","deviceId":"fixture-doorbell","type":"motion","subType":"package_delivery","ts":"2026-10-20T11:55:00.000Z","source":"fixture"},
+    {"id":"evt-vehicle","deviceId":"fixture-doorbell","type":"motion","subType":"vehicle","ts":"2026-10-20T11:50:00.000Z","source":"fixture"},
+    {"id":"evt-animal","deviceId":"fixture-doorbell","type":"motion","subType":"animal","ts":"2026-10-20T11:45:00.000Z","source":"fixture"},
+    {"id":"evt-other","deviceId":"fixture-doorbell","type":"motion","subType":"other_motion","ts":"2026-10-20T11:40:00.000Z","source":"fixture"},
+    {"id":"evt-offline","deviceId":"fixture-doorbell","type":"device_offline","subType":null,"ts":"2026-10-20T11:35:00.000Z","source":"fixture"},
+    {"id":"evt-online","deviceId":"fixture-doorbell","type":"device_online","subType":null,"ts":"2026-10-20T11:30:00.000Z","source":"fixture"}
+  ],
+  "webhook_samples": [
+    {"meta":{"version":"1.1","time":1792498500000,"request_id":"fixture-motion","account_id":"synthetic"},"data":{"id":"fixture-motion","type":"motion_detected","attributes":{"source":"fixture-doorbell","source_type":"device","timestamp":1792498500000,"sub_type":"human"}}},
+    {"meta":{"version":"1.1","time":1792498400000,"request_id":"fixture-button","account_id":"synthetic"},"data":{"id":"fixture-button","type":"button_press","attributes":{"source":"fixture-doorbell","source_type":"device","timestamp":1792498400000}}},
+    {"meta":{"version":"1.1","time":1792498300000,"request_id":"fixture-offline","account_id":"synthetic"},"data":{"id":"fixture-offline","type":"device_offline","attributes":{"source":"fixture-doorbell","source_type":"device","timestamp":1792498300000}}},
+    {"meta":{"version":"1.1","time":1792498200000,"request_id":"fixture-online","account_id":"synthetic"},"data":{"id":"fixture-online","type":"device_online","attributes":{"source":"fixture-doorbell","source_type":"device","timestamp":1792498200000}}},
+    {"meta":{"version":"1.1","time":1792498100000,"request_id":"fixture-integration-removed","account_id":"synthetic"},"data":{"id":"fixture-integration-removed","type":"app_integration_removed","attributes":{"source":"fixture-doorbell","source_type":"integration","timestamp":1792498100000}}},
+    {"meta":{"version":"1.1","time":1792498000000,"request_id":"fixture-device-added","account_id":"synthetic"},"data":{"id":"fixture-device-added","type":"device_added","attributes":{"source":"fixture-doorbell","source_type":"device","timestamp":1792498000000}}},
+    {"meta":{"version":"1.1","time":1792497900000,"request_id":"fixture-device-removed","account_id":"synthetic"},"data":{"id":"fixture-device-removed","type":"device_removed","attributes":{"source":"fixture-doorbell","source_type":"device","timestamp":1792497900000}}},
+    {"meta":{"version":"1.1","time":1792497800000,"request_id":"fixture-subscription-on","account_id":"synthetic"},"data":{"id":"fixture-subscription-on","type":"subscription_activated","attributes":{"source":"fixture-doorbell","source_type":"subscription","timestamp":1792497800000}}},
+    {"meta":{"version":"1.1","time":1792497700000,"request_id":"fixture-subscription-off","account_id":"synthetic"},"data":{"id":"fixture-subscription-off","type":"subscription_deactivated","attributes":{"source":"fixture-doorbell","source_type":"subscription","timestamp":1792497700000}}},
+    {"meta":{"version":"1.1","time":1792497600000,"request_id":"fixture-app-added","account_id":"synthetic"},"data":{"id":"fixture-app-added","type":"app_integration_added","attributes":{"source":"fixture-doorbell","source_type":"integration","timestamp":1792497600000}}}
+  ],
+  "error_scenarios": [{"status":401,"code":"TOKEN_INVALID"},{"status":403,"code":"FORBIDDEN"},{"status":429,"retry_after":"30"},{"status":503,"code":"DEVICE_OFFLINE"}]
+}

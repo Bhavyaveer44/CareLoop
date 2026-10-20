@@ -1,0 +1,9 @@
+{
+  "baseUrl": "https://api.amazonvision.com",
+  "tokenUrl": "https://oauth.ring.com/oauth/token",
+  "paths": {
+    "devices": "/v1/devices?include=status,configurations,location",
+    "status": "/v1/devices/{id}/status",
+    "history": "/v1/history/devices/{id}/events?event_types={eventTypes}"
+  }
+}

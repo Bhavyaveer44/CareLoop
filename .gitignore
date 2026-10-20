@@ -1,0 +1,9 @@
+.env
+data/
+ring-refresh.json
+tokens
+*.token
+*.secret
+node_modules/
+npm-debug.log*
+*.log
