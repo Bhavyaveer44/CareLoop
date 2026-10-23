@@ -62,6 +62,12 @@ test('raw webhook bad signature returns 401; valid unknown type returns 200, is 
   const duplicate=processWebhook(payload,'webhook');assert.equal(duplicate.duplicate,true);const unknownEvents=store.get().events.filter(event=>event.id==='http-unknown-event');assert.equal(unknownEvents.length,1);assert.equal(unknownEvents[0].type,'unknown');
 });
 
+test('signed simulator events can use the actual webhook receiver and keep simulated provenance',async()=>{
+  const payload={meta:{request_id:'webhook-simulator-flow'},data:{id:'webhook-simulator-flow',type:'motion_detected',attributes:{timestamp:+clock.now(),sub_type:'human'}}};const raw=JSON.stringify(payload);
+  const result=await request('/ring/webhook',{user:null,method:'POST',raw,headers:{'X-Signature':sign(raw),'X-CareLoop-Source':'simulated'}});assert.equal(result.response.status,200);await new Promise(resolve=>setImmediate(resolve));
+  const event=store.get().events.find(item=>item.id==='webhook-simulator-flow');assert.equal(event.type,'motion');assert.equal(event.subType,'human');assert.equal(event.source,'simulated');
+});
+
 test('known simulated vehicle, animal and other motion events retain their event subtype',()=>{
   for(const subtype of ['vehicle','animal','other_motion']){const result=processWebhook({meta:{request_id:`known-${subtype}`},data:{id:`known-${subtype}`,type:'motion_detected',attributes:{timestamp:+clock.now(),sub_type:subtype}}},'simulated');assert.equal(result.event.type,'motion');assert.equal(result.event.subType,subtype);assert.equal(result.known,true);}
 });

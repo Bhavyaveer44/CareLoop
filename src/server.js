@@ -17,6 +17,7 @@ function simulationEnabled(environment={}){return environment.DEMO_MODE!=='false
 function demoResetEnabled(environment={}){return simulationEnabled(environment);}
 const demo=simulationEnabled(process.env);
 const webhookSecret=process.env.RING_WEBHOOK_SECRET||'careloop-local-demo-webhook-secret';
+function ringCredentialsAvailable(){return Boolean(pastedAccessToken||process.env.RING_ACCESS_TOKEN||(process.env.RING_REFRESH_TOKEN&&process.env.RING_CLIENT_ID&&process.env.RING_CLIENT_SECRET));}
 const seedUsers=[
   {id:'margaret',name:'Margaret',role:'recipient',tz:'America/New_York',quietHours:{start:'22:00',end:'07:00'},testToken:'careloop-demo-margaret-token'},
   {id:'priya',name:'Priya',role:'primary',tz:'America/Los_Angeles',quietHours:{start:'22:00',end:'07:00'},testToken:'careloop-demo-priya-token'},
@@ -36,7 +37,7 @@ function seedState() {
   state.household={
     id:'household',tz:process.env.HOUSEHOLD_TZ||'America/New_York',promptAt:'08:00',reminderAt:'09:30',cutoff:'10:00',cutoffAt:'10:00',
     ackWindowMin:5,freshnessMin:30,promoteAfterMin:60,ringConsentAt:now,
-    ringHealth:{ok:mode!=='playground',lastSyncAt:mode==='playground'?null:now,error:null,motionEnabled:true,country:'US'},
+    ringHealth:{ok:mode!=='playground',lastSyncAt:mode==='playground'?null:now,lastSyncMode:mode==='playground'?null:mode,error:null,motionEnabled:true,country:'US'},
     sharingPaused:false,consents:{priya:{approved:true,role:'primary',approvedAt:now},arjun:{approved:true,role:'backup',approvedAt:now}},
     retentionDays:30,deviceOnline:true,motionEnabled:true
   };
@@ -247,7 +248,7 @@ async function syncRing() {
       state.events=[...afterConsent,...state.events.filter(event=>event.source==='webhook'||event.source==='simulated'||(mode==='fixtures'&&event.source==='fixture'))].sort((a,b)=>Date.parse(b.ts||0)-Date.parse(a.ts||0));
       state.household.deviceOnline=true;
       state.household.motionEnabled=devices.every(device=>device.motionEnabled!=='off');
-      state.household.ringHealth={ok:true,lastSyncAt:clock.now().toISOString(),error:null,motionEnabled:state.household.motionEnabled,country:devices[0]?.country||null,state:devices[0]?.state||null};
+      state.household.ringHealth={ok:true,lastSyncAt:clock.now().toISOString(),lastSyncMode:'playground',error:null,motionEnabled:state.household.motionEnabled,country:devices[0]?.country||null,state:devices[0]?.state||null};
     });
     pollNotBefore=-Infinity;serverErrorCount=0;
     ensureToday();return true;
@@ -271,6 +272,10 @@ function signed(raw,signature) {
   const supplied=Buffer.from(signature.slice(7),'hex');
   return expected.length===supplied.length&&crypto.timingSafeEqual(expected,supplied);
 }
+function verifySignedPayload(raw,signature) {
+  if(!signed(raw,signature))return {error:'BAD_SIGNATURE'};
+  try{return {payload:JSON.parse(raw.toString('utf8'))};}catch{return {error:'INVALID_JSON'};}
+}
 function processWebhook(payload,source) {
   const meta=payload?.meta||{},data=payload?.data||{},attributes=data.attributes||{};
   if(meta.request_id&&store.get().webhookRequests.some(item=>(typeof item==='string'?item:item.id)===meta.request_id))return {duplicate:true};
@@ -283,8 +288,8 @@ function processWebhook(payload,source) {
   const controlTypes=new Set(['token_expired','motion_detection_disabled']);
   const motionSubtypes=new Set(['vehicle','animal','other_motion','package_delivery']);
   const event={id:String(data.id||meta.request_id||crypto.randomUUID()),deviceId,
-    type:type==='motion_detected'||motionSubtypes.has(type)?'motion':type==='button_press'?'doorbell_press':type==='device_offline'?'device_offline':type==='device_online'?'device_online':type==='delivery'?'delivery':'unknown',
-    subType:attributes.sub_type||(motionSubtypes.has(type)?type:null),ts,source};
+    type:['motion_detected','motion.human','motion'].includes(type)||motionSubtypes.has(type)?'motion':type==='button_press'?'doorbell_press':type==='device_offline'?'device_offline':type==='device_online'?'device_online':type==='delivery'?'delivery':['live_view','on_demand'].includes(type)?'live_view':'unknown',
+    subType:attributes.sub_type||(motionSubtypes.has(type)?type:type==='motion.human'?'human':['motion','motion_detected'].includes(type)?'motion':null),ts,source};
   store.mutate(state=>{
     if(meta.request_id)state.webhookRequests.push({id:meta.request_id,at:clock.now().toISOString()});
     if(afterConsent&&!state.events.some(item=>item.id===event.id))state.events.push(event);
@@ -338,17 +343,20 @@ app.post('/api/ring/token',auth,roles('recipient'),express.json({limit:'8kb'}),(
   res.json({ok:true,stored:'memory_only'});
 });
 app.post('/ring/webhook',express.raw({type:'application/json',limit:'256kb'}),(req,res)=>{
-  if(!signed(req.body,req.get('x-signature')))return res.status(401).json({error:'BAD_SIGNATURE'});
-  let payload;try{payload=JSON.parse(req.body.toString('utf8'));}catch{return res.status(200).json({ok:true});}
+  const verified=verifySignedPayload(req.body,req.get('x-signature'));
+  if(verified.error==='BAD_SIGNATURE')return res.status(401).json({error:'BAD_SIGNATURE'});
+  if(verified.error)return res.status(200).json({ok:true});
+  const source=demo&&req.get('x-careloop-source')==='simulated'?'simulated':'webhook';
   res.status(200).json({ok:true});
-  setImmediate(()=>{try{processWebhook(payload,'webhook');}catch{audit('webhook_processing_failed');}});
+  setImmediate(()=>{try{processWebhook(verified.payload,source);}catch{audit('webhook_processing_failed');}});
 });
 app.post('/api/simulate/event',express.raw({type:'application/json',limit:'256kb'}),(req,res)=>{
   if(!demo)return res.status(404).json({error:'SIMULATION_DISABLED'});
-  if(!signed(req.body,req.get('x-signature')))return res.status(401).json({error:'BAD_SIGNATURE'});
-  let payload;try{payload=JSON.parse(req.body.toString('utf8'));}catch{return res.status(400).json({error:'INVALID_JSON'});}
+  const verified=verifySignedPayload(req.body,req.get('x-signature'));
+  if(verified.error==='BAD_SIGNATURE')return res.status(401).json({error:'BAD_SIGNATURE'});
+  if(verified.error)return res.status(400).json({error:'INVALID_JSON'});
   res.status(200).json({ok:true});
-  setImmediate(()=>{try{processWebhook(payload,'simulated');}catch{audit('simulation_processing_failed');}});
+  setImmediate(()=>{try{processWebhook(verified.payload,'simulated');}catch{audit('simulation_processing_failed');}});
 });
 app.use(express.json({limit:'32kb'}));
 
@@ -357,7 +365,9 @@ app.post('/api/demo/scenario',auth,roles('recipient','primary','backup'),(req,re
   const scenarios={visitor:['button_press',null],motion:['motion_detected','human'],offline:['device_offline','motion'],recover:['device_online',null],token:['token_expired',null],disabled:['motion_detection_disabled',null]};
   const [type,subType]=scenarios[req.body?.kind]||[];if(!type)return res.status(400).json({error:'UNKNOWN_SCENARIO'});
   const payload={meta:{version:'1.1',time:+clock.now(),request_id:crypto.randomUUID(),account_id:'local-demo'},data:{id:crypto.randomUUID(),type,attributes:{source:'demo-device',timestamp:+clock.now(),sub_type:subType}}};
-  processWebhook(payload,'simulated');res.json({ok:true});
+  const raw=Buffer.from(JSON.stringify(payload)),signature='sha256='+crypto.createHmac('sha256',webhookSecret).update(raw).digest('hex');
+  const verified=verifySignedPayload(raw,signature);if(verified.error)return res.status(500).json({error:'SIMULATION_FAILED'});
+  setImmediate(()=>{try{processWebhook(verified.payload,'simulated');}catch{audit('simulation_processing_failed');}});res.json({ok:true});
 });
 app.post('/api/demo/reset',auth,roles('recipient','primary','backup'),(req,res)=>{
   if(!demoResetEnabled(process.env))return res.status(404).json({error:'NOT_FOUND'});
@@ -365,7 +375,7 @@ app.post('/api/demo/reset',auth,roles('recipient','primary','backup'),(req,res)=
   lastPoll=-Infinity;pollNotBefore=-Infinity;serverErrorCount=0;
   audit('demo_state_reset',req.user);res.json({ok:true,message:'Demo state reset. You can run the scenario again.'});
 });
-app.get('/api/household',auth,roles('recipient','primary','backup'),(req,res)=>res.json({household:safeHousehold(),mode,demoMode:demo}));
+app.get('/api/household',auth,roles('recipient','primary','backup'),(req,res)=>res.json({household:safeHousehold(),mode,demoMode:demo,ringConfigured:mode==='playground'&&ringCredentialsAvailable()}));
 app.get('/api/alerts',auth,roles('primary','backup'),(req,res)=>{ensureToday();accessRead(req,'alerts');res.json({alerts:store.get().alerts,exhaustedText:EXHAUSTED_TEXT});});
 app.get('/api/timeline',auth,roles('primary','backup'),(req,res)=>{
   accessRead(req,'timeline');
@@ -440,7 +450,7 @@ function caregiverPage(ringMode,demoMode) {
 function recipientPage() {
   return `<h1>Good morning, Margaret</h1><section class="card recipient" aria-live="polite"><p>How are you feeling today?</p><button id="ok">I’m okay</button><button id="help" class="urgent">Need help</button><button id="read">Read this page aloud</button><p id="recipientStatus" aria-live="polite"></p><p id="recipientNotice" aria-live="polite"></p></section><section class="card"><h2>What your family can see today</h2><p>Your family sees whether you checked in, the status of any family task, and limited Ring event labels when sharing is on. Ring does not tell them whether you are okay.</p><label class="toggle"><input id="contrast" type="checkbox"> High contrast</label><button id="pause">Pause sharing</button><button id="resume">Resume sharing</button><button id="delete" class="urgent">Delete household data</button><p>No emergency services are contacted by CareLoop.</p></section>`;
 }
-function sourcesPage(){return `<h1>Evidence sources</h1><p>Fixture and simulated events are synthetic and must not be treated as real-world Ring evidence.</p><section class="card"><table><thead><tr><th>Source</th><th>Events</th><th>Meaning</th></tr></thead><tbody id="sourceRows"></tbody></table></section><p>Ring evidence never closes an alert. No media, video, or snapshots are accessed.</p>`;}
+function sourcesPage(){return `<h1>Evidence sources</h1><p>Fixtures are synthetic samples. Simulator events are synthetic even when carried through the signed webhook receiver. <code>ring_api</code> events come from Ring only when Playground mode is configured and a successful API sync occurs. <code>webhook</code> means a signed incoming Ring webhook; no event source establishes that a resident is safe.</p><section class="card"><table><thead><tr><th>Source</th><th>Events</th><th>Meaning</th></tr></thead><tbody id="sourceRows"></tbody></table></section><p>CareLoop never accesses video, media, or snapshots. Ring evidence never closes an alert.</p>`;}
 function renderPage(page) {
   const content=page==='recipient'?recipientPage():page==='sources'?sourcesPage():caregiverPage(mode,demo);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CareLoop · ${page}</title><link rel="stylesheet" href="/style.css"></head><body><header><a href="/caregiver" class="brand">CareLoop</a><nav aria-label="Main navigation"><a href="/caregiver">Caregiver</a><a href="/recipient">Margaret</a><a href="/sources">Sources</a></nav></header><main>${demo?'<div class="banner">Demo time accelerated · fixture and simulated events are synthetic, not real Ring evidence.</div>':''}${content}</main><script src="/app.js" defer></script></body></html>`;
@@ -452,9 +462,9 @@ app.get('/style.css',(_req,res)=>res.type('text/css').send(css));
 app.get('/app.js',(_req,res)=>res.type('application/javascript').send(js));
 const css=`:root{font-family:system-ui,sans-serif;color:#102a31;background:#f3f8f7;font-size:18px}*{box-sizing:border-box}body{margin:0}header{background:#123f46;color:#fff;padding:1rem max(1rem,calc((100% - 960px)/2));display:flex;justify-content:space-between;gap:1rem;align-items:center}a{color:inherit}nav{display:flex;gap:1rem}main{max-width:900px;margin:2rem auto;padding:0 1rem}.brand{font-size:1.35rem;font-weight:800;text-decoration:none}.banner{background:#fff3cd;color:#302400;border:2px solid #694e00;padding:1rem;margin-bottom:1rem}.card{background:#fff;border:1px solid #547077;border-radius:12px;padding:1.25rem;margin:1rem 0}.recipient{font-size:1.35rem}button{min-height:48px;min-width:44px;padding:.7rem 1rem;margin:.4rem .35rem .2rem 0;border:2px solid #123f46;border-radius:8px;background:#14525b;color:#fff;font:inherit;cursor:pointer}button.urgent{background:#8c2828}input,textarea{display:block;width:100%;min-height:48px;padding:.6rem;font:inherit;border:2px solid #45656b;border-radius:6px;margin:.3rem 0 1rem}textarea{min-height:90px}label{font-weight:650}.chip{display:inline-block;border:1px solid #45656b;border-radius:99px;padding:.4rem .8rem}.small{font-size:.9rem}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{outline:4px solid #f0a900;outline-offset:2px}table{width:100%;border-collapse:collapse}th,td{text-align:left;border-bottom:1px solid #9baeb0;padding:.7rem}.contrast{background:#000;color:#fff}.contrast .card{background:#050505;color:#fff;border-color:#fff}.contrast button{border-color:#fff}html{scroll-behavior:smooth}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}`;
 const js=`(()=>{const page=location.pathname.slice(1)||'caregiver';const headers={'Content-Type':'application/json'};const api=async(url,options={})=>{const response=await fetch(url,{...options,credentials:'same-origin',headers:{...headers,...options.headers}});let data={};try{data=await response.json()}catch{}if(!response.ok){const safeRecipientMessage={ALERT_TERMINAL:'Thanks for checking in. Your family has received your response.',VERSION_CONFLICT:'Thanks for checking in. Your family has received your response.'};throw new Error(page==='recipient'?(safeRecipientMessage[data.error]||'We could not save that just now. Please try again.'):(data.error||'Request failed'))}return data};const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));let alertId=null,alertVersion=null;
-if(page==='caregiver'){const status=document.querySelector('#careStatus');async function load(){try{const [a,t,h]=await Promise.all([api('/api/alerts'),api('/api/timeline'),api('/api/household')]);const current=a.alerts.at(-1);alertId=current?.id||null;alertVersion=current?.version??null;document.querySelector('#alerts').innerHTML=current?'<strong>'+esc(current.state)+' · '+esc(current.ownerId||'unassigned')+'</strong> · '+esc(current.decision):'No alert yet';document.querySelector('#why').textContent=current?.reason||'No current evidence has been recorded.';document.querySelector('#alertSource').textContent=current?.confirmationSource?'Confirmation recorded by: '+current.confirmationSource:'';document.querySelector('#timeline').innerHTML=t.events.map(event=>'<li>'+esc(event.ts)+' · '+esc(event.type)+' · '+esc(event.subType||'')+' ('+esc(event.source)+')</li>').join('');const health=h.household.ringHealth;const age=health.lastSyncAt?Math.max(0,Math.round((Date.now()-Date.parse(health.lastSyncAt))/1000))+'s ago':'no successful sync';document.querySelector('#ringHealth').textContent='Ring: '+h.mode+' - last sync '+age+(health.error?' · '+health.error:'');}catch(error){status.textContent=error.message}}load();setInterval(load,5000);const act=async action=>{if(!alertId)return;const note=document.querySelector('#careNote').value.trim();if(!note){status.textContent='Add a note before continuing.';document.querySelector('#careNote').focus();return}try{await api('/api/alerts/'+alertId+'/'+action,{method:'POST',body:JSON.stringify({note,expectedVersion:alertVersion})});status.textContent='Update saved.';await load()}catch(error){status.textContent=error.message}};document.querySelector('#ack').onclick=()=>act('ack');document.querySelector('#resolve').onclick=()=>act('resolve');document.querySelector('#phone').onclick=()=>act('confirm-by-phone');document.querySelector('#setSpeed')?.addEventListener('click',async()=>{try{await api('/api/clock',{method:'POST',body:JSON.stringify({speed:Number(document.querySelector('#speed').value)})});status.textContent='Clock updated.'}catch(error){status.textContent=error.message}});document.querySelectorAll('[data-scenario]').forEach(button=>button.onclick=async()=>{try{await api('/api/demo/scenario',{method:'POST',body:JSON.stringify({kind:button.dataset.scenario})});status.textContent='Scenario added.';await load()}catch(error){status.textContent=error.message}})}
+if(page==='caregiver'){const status=document.querySelector('#careStatus');async function load(){try{const [a,t,h]=await Promise.all([api('/api/alerts'),api('/api/timeline'),api('/api/household')]);const current=a.alerts.at(-1);alertId=current?.id||null;alertVersion=current?.version??null;document.querySelector('#alerts').innerHTML=current?'<strong>'+esc(current.state)+' · '+esc(current.ownerId||'unassigned')+'</strong> · '+esc(current.decision):'No alert yet';document.querySelector('#why').textContent=current?.reason||'No current evidence has been recorded.';document.querySelector('#alertSource').textContent=current?.confirmationSource?'Confirmation recorded by: '+current.confirmationSource:'';document.querySelector('#timeline').innerHTML=t.events.map(event=>'<li>'+esc(event.ts)+' · '+esc(event.type)+' · '+esc(event.subType||'')+' ('+esc(event.source)+')</li>').join('');const health=h.household.ringHealth;const syncedAt=h.mode==='playground'?(health.lastSyncMode==='playground'?health.lastSyncAt:null):health.lastSyncAt;const age=syncedAt?Math.max(0,Math.round((Date.now()-Date.parse(syncedAt))/1000))+'s ago':'no successful sync';const household=h.household,playground=h.mode==='playground';const device=playground?health.error==='DEVICE_OFFLINE'||household.deviceOnline===false?'offline':syncedAt?'online':'unknown':household.deviceOnline?'online (synthetic)':'offline (simulated)';const motion=playground?health.error==='MOTION_DISABLED'||household.motionEnabled===false?'disabled':syncedAt?'enabled':'unknown':household.motionEnabled?'enabled (synthetic)':'disabled (simulated)';const setup=playground&&!h.ringConfigured?' · Playground not configured':'';document.querySelector('#ringHealth').textContent='Ring: '+h.mode+' · last sync '+age+' · device '+device+' · motion '+motion+setup+(health.error?' · '+health.error:'');}catch(error){status.textContent=error.message}}load();setInterval(load,5000);const act=async action=>{if(!alertId)return;const note=document.querySelector('#careNote').value.trim();if(!note){status.textContent='Add a note before continuing.';document.querySelector('#careNote').focus();return}try{await api('/api/alerts/'+alertId+'/'+action,{method:'POST',body:JSON.stringify({note,expectedVersion:alertVersion})});status.textContent='Update saved.';await load()}catch(error){status.textContent=error.message}};document.querySelector('#ack').onclick=()=>act('ack');document.querySelector('#resolve').onclick=()=>act('resolve');document.querySelector('#phone').onclick=()=>act('confirm-by-phone');document.querySelector('#setSpeed')?.addEventListener('click',async()=>{try{await api('/api/clock',{method:'POST',body:JSON.stringify({speed:Number(document.querySelector('#speed').value)})});status.textContent='Clock updated.'}catch(error){status.textContent=error.message}});document.querySelectorAll('[data-scenario]').forEach(button=>button.onclick=async()=>{try{await api('/api/demo/scenario',{method:'POST',body:JSON.stringify({kind:button.dataset.scenario})});status.textContent='Scenario added.';await load()}catch(error){status.textContent=error.message}})}
 if(page==='recipient'){const status=document.querySelector('#recipientStatus');const notice=document.querySelector('#recipientNotice');const loadRecipient=async()=>{try{const data=await api('/api/recipient/status');const item=data.notifications.at(-1);if(item)notice.textContent=item.message}catch(error){notice.textContent=error.message}};loadRecipient();setInterval(loadRecipient,10000);document.querySelector('#ok').onclick=()=>sendConfirmation('ok');document.querySelector('#help').onclick=()=>sendConfirmation('help');async function sendConfirmation(value){try{const result=await api('/api/recipient/confirm',{method:'POST',body:JSON.stringify({status:value})});status.textContent=result.message||(value==='ok'?'Thanks for checking in.':'Your family has been asked to check in.')}catch(error){status.textContent=error.message}}document.querySelector('#read').onclick=()=>{if('speechSynthesis'in window)speechSynthesis.speak(new SpeechSynthesisUtterance(document.body.innerText));else status.textContent='Read-aloud is unavailable in this browser.'};document.querySelector('#contrast').onchange=event=>document.body.classList.toggle('contrast',event.target.checked);document.querySelector('#pause').onclick=()=>api('/api/recipient/pause',{method:'POST',body:JSON.stringify({paused:true})}).then(()=>status.textContent='Sharing paused.').catch(error=>status.textContent=error.message);document.querySelector('#resume').onclick=()=>api('/api/recipient/pause',{method:'POST',body:JSON.stringify({paused:false})}).then(()=>status.textContent='Sharing resumed.').catch(error=>status.textContent=error.message);document.querySelector('#delete').onclick=async()=>{if(!window.confirm('Delete household data?'))return;try{await api('/api/household',{method:'DELETE'});document.body.innerHTML='<main><h1>Deletion requested</h1><p>Household data was deleted; only the request tombstone remains.</p></main>'}catch(error){status.textContent=error.message}}}
-if(page==='sources'){api('/api/sources').then(result=>{const labels={fixture:'Synthetic document-shaped sample',simulated:'Locally simulated',ring_api:'Ring API metadata',webhook:'Signed Ring webhook'};document.querySelector('#sourceRows').innerHTML=Object.entries(result.counts).map(([source,count])=>'<tr><td>'+esc(source)+'</td><td>'+count+'</td><td>'+esc(labels[source]||'Unknown source')+'</td></tr>').join('')||'<tr><td colspan="3">No events</td></tr>'}).catch(error=>document.querySelector('#sourceRows').innerHTML='<tr><td colspan="3">'+esc(error.message)+'</td></tr>')}})();`;
+if(page==='sources'){api('/api/sources').then(result=>{const labels={fixture:'Synthetic fixture sample',simulated:'Synthetic simulator event',ring_api:'Real Ring API metadata (Playground only)',webhook:'Signed incoming Ring webhook'};document.querySelector('#sourceRows').innerHTML=Object.entries(result.counts).map(([source,count])=>'<tr><td>'+esc(source)+'</td><td>'+count+'</td><td>'+esc(labels[source]||'Unknown source')+'</td></tr>').join('')||'<tr><td colspan="3">No events</td></tr>'}).catch(error=>document.querySelector('#sourceRows').innerHTML='<tr><td colspan="3">'+esc(error.message)+'</td></tr>')}})();`;
 
 app.use((error,req,res,next)=>{
   if(req.path==='/ring/webhook'&&error.type==='entity.too.large')return res.status(200).json({ok:true});
@@ -502,4 +512,4 @@ function sweep() {
 const timer=setInterval(()=>{try{sweep();if(mode==='playground')syncRing();}catch{}},1000);timer.unref();
 const port=Number(process.env.PORT)||3000;
 if(require.main===module)app.listen(port,()=>console.log(`CareLoop listening on http://localhost:${port} (${mode})`));
-module.exports={app,store,clock,signed,processWebhook,ensureToday,sweep,syncRing,dataGapReason,ringClient,mode,demo,seedUsers,simulationEnabled,demoResetEnabled,syncHealthError,persistRefresh};
+module.exports={app,store,clock,signed,verifySignedPayload,processWebhook,ensureToday,sweep,syncRing,dataGapReason,ringClient,mode,demo,seedUsers,simulationEnabled,demoResetEnabled,syncHealthError,persistRefresh};

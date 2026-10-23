@@ -2,6 +2,14 @@
 
 CareLoop turns a household morning check into an owned, acknowledged, escalated family action. Ring metadata can add context, but it cannot establish that a person is okay. CareLoop never contacts emergency services.
 
+## Ring integration status
+
+CareLoop is a hackathon prototype built for the Ring track. It uses the Ring Developer Playground/API path where available for device discovery, device status, motion configuration, and Event History. It also implements a Ring-compatible webhook receiver with raw-body HMAC-SHA256 verification and request_id-based idempotency.
+
+The live demo primarily uses Ring-shaped simulator events routed through the signed webhook receiver and the same event normalization and CareLoop processing path used for incoming Ring events. Fixture mode lets judges run the project without Ring credentials. The source labels distinguish synthetic `fixture` and `simulated` records from real `ring_api` records and signed incoming `webhook` events.
+
+This is not a certified Ring Appstore product; production publication is outside the scope of this hackathon prototype. Playground staging, account linking, or API access may depend on Ring developer-platform restrictions and an eligible Ring account. Do not treat fixture or simulator records as real observations. CareLoop never accesses video, media, or snapshots. Ring signals do not establish that a resident is safe, and CareLoop never contacts emergency services.
+
 ## Judging map
 
 | Criterion | Evidence |
