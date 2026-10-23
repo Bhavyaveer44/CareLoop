@@ -1,6 +1,11 @@
 .env
+.env.local
+.env.production
+.env.*.local
 data/
 ring-refresh.json
+ring-credentials.json
+ring-token.json
 tokens
 *.token
 *.secret

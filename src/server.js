@@ -16,7 +16,9 @@ const mode=['fixtures','playground','simulator'].includes(process.env.RING_MODE)
 function simulationEnabled(environment={}){return environment.DEMO_MODE!=='false';}
 function demoResetEnabled(environment={}){return simulationEnabled(environment);}
 const demo=simulationEnabled(process.env);
-const webhookSecret=process.env.RING_WEBHOOK_SECRET||'careloop-local-demo-webhook-secret';
+// Public synthetic key for the local simulator only. Configure RING_WEBHOOK_SECRET
+// for any non-demo webhook use; the demo key is not a credential.
+const webhookSecret=process.env.RING_WEBHOOK_SECRET||(demo?'synthetic-local-demo-hmac-key-not-a-secret':null);
 function ringCredentialsAvailable(){return Boolean(pastedAccessToken||process.env.RING_ACCESS_TOKEN||(process.env.RING_REFRESH_TOKEN&&process.env.RING_CLIENT_ID&&process.env.RING_CLIENT_SECRET));}
 const seedUsers=[
   {id:'margaret',name:'Margaret',role:'recipient',tz:'America/New_York',quietHours:{start:'22:00',end:'07:00'},testToken:'careloop-demo-margaret-token'},
@@ -267,6 +269,7 @@ function safeHousehold(state=store.get()) {
   return {...state.household,consents:Object.fromEntries(Object.entries(state.household.consents||{}).map(([id,c])=>[id,{approved:Boolean(c.approved),role:c.role}]))};
 }
 function signed(raw,signature) {
+  if(!webhookSecret)return false;
   if(!Buffer.isBuffer(raw)||typeof signature!=='string'||!/^sha256=[a-f0-9]{64}$/i.test(signature))return false;
   const expected=crypto.createHmac('sha256',webhookSecret).update(raw).digest();
   const supplied=Buffer.from(signature.slice(7),'hex');

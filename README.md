@@ -10,6 +10,18 @@ The live demo primarily uses Ring-shaped simulator events routed through the sig
 
 This is not a certified Ring Appstore product; production publication is outside the scope of this hackathon prototype. Playground staging, account linking, or API access may depend on Ring developer-platform restrictions and an eligible Ring account. Do not treat fixture or simulator records as real observations. CareLoop never accesses video, media, or snapshots. Ring signals do not establish that a resident is safe, and CareLoop never contacts emergency services.
 
+The zero-configuration local simulator uses a public synthetic HMAC key only when demo mode is enabled. It is not a secret or a Ring credential. Set `RING_WEBHOOK_SECRET` to configure a different signing key.
+
+## Demo Flow
+
+1. Start CareLoop with `npm start`.
+2. Reset demo state at `POST /api/demo/reset`, then run `npm run scenario` against the running server; the deterministic simulator sends signed events through `/ring/webhook`.
+3. Open `/recipient` and choose “I’m okay” to show the family check resolving.
+4. Reset the demo, choose “Need help,” then use `/caregiver` to acknowledge and confirm by phone.
+5. Run the simulator and show its Ring-shaped event and source label in the caregiver timeline and `/sources`.
+6. Explain that Ring evidence is contextual and never independently closes a safety alert or establishes that a resident is safe.
+7. Ring Developer Playground/API records are real only when Playground mode and valid operator credentials are configured. The local deterministic simulator and fixture data are synthetic and clearly labeled.
+
 ## Judging map
 
 | Criterion | Evidence |

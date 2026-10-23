@@ -17,7 +17,7 @@ async function request(path,{user='priya',headers={},method='GET',body,raw}={}) 
   else if(body!==undefined){options.body=JSON.stringify(body);options.headers['Content-Type']='application/json';}
   const response=await fetch(`${base}${path}`,options);let result={};try{result=await response.json();}catch{}return {response,result};
 }
-function sign(raw){return 'sha256='+crypto.createHmac('sha256','careloop-local-demo-webhook-secret').update(raw).digest('hex');}
+function sign(raw){return 'sha256='+crypto.createHmac('sha256','synthetic-local-demo-hmac-key-not-a-secret').update(raw).digest('hex');}
 function cleanForDay(){store.mutate(state=>{state.alerts=[];state.events=[];state.notifications=[];state.confirmations={};state.household.sharingPaused=false;state.household.motionEnabled=true;state.household.deviceOnline=true;state.household.ringHealth={ok:true,lastSyncAt:null,error:null,motionEnabled:true,country:'US'};});}
 
 test('all three frontend pages and assets render; UI contains no seeded bearer tokens',async()=>{

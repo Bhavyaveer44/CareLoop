@@ -1,6 +1,7 @@
 'use strict';
 const crypto=require('node:crypto');
-const base=process.env.CARELOOP_URL||'http://localhost:3000';const secret=process.env.RING_WEBHOOK_SECRET||'careloop-local-demo-webhook-secret';const bearer=process.env.CARELOOP_TOKEN||'careloop-demo-priya-token';
+// Match the server's public, synthetic simulator key when no env secret is configured.
+const base=process.env.CARELOOP_URL||'http://localhost:3000';const secret=process.env.RING_WEBHOOK_SECRET||'synthetic-local-demo-hmac-key-not-a-secret';const bearer=process.env.CARELOOP_TOKEN||'careloop-demo-priya-token';
 if(process.env.DEMO_MODE==='false'){console.error('Scenario requires DEMO_MODE=true');process.exit(1);}
 async function demoNow(){const r=await fetch(`${base}/api/clock`,{headers:{Authorization:`Bearer ${bearer}`}});if(!r.ok)throw Error('Could not read the CareLoop demo clock');return Date.parse((await r.json()).now);}
 async function send(type,sub_type){const timestamp=await demoNow();const payload={meta:{version:'1.1',time:timestamp,request_id:crypto.randomUUID(),account_id:'local-demo'},data:{id:crypto.randomUUID(),type,attributes:{source:'scenario-device',timestamp,sub_type}}};const raw=JSON.stringify(payload);const signature='sha256='+crypto.createHmac('sha256',secret).update(raw).digest('hex');const r=await fetch(`${base}/ring/webhook`,{method:'POST',headers:{'Content-Type':'application/json','X-Signature':signature,'X-CareLoop-Source':'simulated'},body:raw});if(!r.ok)throw Error(`Scenario request failed (${r.status})`);}
